@@ -111,13 +111,12 @@ public:
     static ssize_t getDisplayWidth(DisplayID dpy);
     static ssize_t getDisplayHeight(DisplayID dpy);
     static ssize_t getDisplayOrientation(DisplayID dpy);
-#ifdef STE_HDMI
     status_t linkToComposerDeath(const sp<IBinder::DeathRecipient>& recipient,
             void* cookie = NULL, uint32_t flags = 0);
-#endif
+#ifdef STE_HDMI
     // Set how to handle the external device output cases
     static status_t setHDMIOutputMode(uint32_t mode = 0);
-
+#endif
     status_t    hide(SurfaceID id);
     status_t    show(SurfaceID id, int32_t layer = -1);
     status_t    freeze(SurfaceID id);
