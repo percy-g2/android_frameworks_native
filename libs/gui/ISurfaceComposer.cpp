@@ -98,7 +98,16 @@ public:
         data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
         remote()->transact(BnSurfaceComposer::BOOT_FINISHED, data, &reply);
     }
-
+#ifdef STE_HDMI
+    virtual status_t setHDMIOutputMode(uint32_t mode)
+    {
+        Parcel data, reply;
+        data.writeInterfaceToken(ISurfaceComposer::getInterfaceDescriptor());
+        data.writeInt32(mode);
+        remote()->transact(BnSurfaceComposer::SET_HDMI_OUTPUT_MODE, data, &reply);
+        return reply.readInt32();
+    }
+#endif
     virtual status_t captureScreen(DisplayID dpy,
             sp<IMemoryHeap>* heap,
             uint32_t* width, uint32_t* height, PixelFormat* format,
@@ -236,6 +245,13 @@ status_t BnSurfaceComposer::onTransact(
             sp<IBinder> b = getCblk()->asBinder();
             reply->writeStrongBinder(b);
         } break;
+#ifdef STE_HDMI
+        case SET_HDMI_OUTPUT_MODE: {
+            CHECK_INTERFACE(ISurfaceComposer, data, reply);
+            int32_t mode = data.readInt32();
+            reply->writeInt32( setHDMIOutputMode(mode) );
+        } break;
+#endif
         case CAPTURE_SCREEN: {
             CHECK_INTERFACE(ISurfaceComposer, data, reply);
             DisplayID dpy = data.readInt32();

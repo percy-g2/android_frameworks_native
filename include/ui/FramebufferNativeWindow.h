@@ -63,9 +63,16 @@ public:
     bool isUpdateOnDemand() const { return mUpdateOnDemand; }
     status_t setUpdateRectangle(const Rect& updateRect);
     status_t compositionComplete();
+#ifdef STE_HARDWARE
+    status_t rotate(unsigned int absoluteDegree);
 
+    void discardQueuedBuffers(bool on)
+#endif
     void dump(String8& result);
-
+#ifdef STE_HARDWARE
+    void UIRotationChange(int uiRotation);
+    void enableHDMIMirroring(bool enable);
+#endif
     // for debugging only
     int getCurrentBufferIndex() const;
 
@@ -78,7 +85,9 @@ private:
     static int queueBuffer(ANativeWindow* window, ANativeWindowBuffer* buffer);
     static int query(const ANativeWindow* window, int what, int* value);
     static int perform(ANativeWindow* window, int operation, ...);
-    
+#ifdef STE_HARDWARE
+    static int cancelBuffer(ANativeWindow* window, android_native_buffer_t* buffer);
+#endif
     framebuffer_device_t* fbDev;
     alloc_device_t* grDev;
 
@@ -92,6 +101,9 @@ private:
     int32_t mBufferHead;
     int32_t mCurrentBufferIndex;
     bool mUpdateOnDemand;
+#ifdef STE_HARDWARE
+    int mDiscardQueuedBuffersCnt;
+#endif
 #ifdef SAMSUNG_HDMI_SUPPORT
     SecHdmiClient *mHdmiClient;
 #endif

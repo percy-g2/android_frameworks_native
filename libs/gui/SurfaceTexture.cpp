@@ -27,7 +27,9 @@
 #include <GLES2/gl2ext.h>
 
 #include <hardware/hardware.h>
-
+#ifdef STE_HARDWARE
+#include <ui/PixelFormat.h>
+#endif
 #include <gui/IGraphicBufferAlloc.h>
 #include <gui/ISurfaceComposer.h>
 #include <gui/SurfaceComposerClient.h>
@@ -123,6 +125,7 @@ SurfaceTexture::SurfaceTexture(GLuint tex, bool allowSynchronousMode,
 #ifdef STE_HARDWARE
     mNextBlitSlot(0),
     mNeedsConversion(false),
+    mConvertPending(false),
 #endif
     mEglDisplay(EGL_NO_DISPLAY),
     mEglContext(EGL_NO_CONTEXT),
@@ -879,6 +882,12 @@ bool SurfaceTexture::isSynchronousMode() const {
 
 void SurfaceTexture::freeBufferLocked(int slotIndex) {
     ST_LOGV("freeBufferLocked: slotIndex=%d", slotIndex);
+#ifdef STE_HARDWARE
+    // Check is we have a pending conversion before free.
+    if (mConvertPending) {
+        convert();
+    }
+#endif
     mEGLSlots[slotIndex].mGraphicBuffer = 0;
     if (slotIndex == mCurrentTexture) {
         mCurrentTexture = BufferQueue::INVALID_BUFFER_SLOT;
@@ -1019,7 +1028,10 @@ void SurfaceTexture::dump(String8& result, const char* prefix,
 #ifdef STE_HARDWARE
 bool SurfaceTexture::conversionIsNeeded(const sp<GraphicBuffer>& graphicBuffer) {
     int fmt = graphicBuffer->getPixelFormat();
-    return (fmt == PIXEL_FORMAT_YCBCR42XMBN) || (fmt == PIXEL_FORMAT_YCbCr_420_P);
+    return (fmt == PIXEL_FORMAT_YCBCR42XMBN)
+            || (fmt == PIXEL_FORMAT_YCbCr_420_P)
+            || (fmt == PIXEL_FORMAT_YCbCr_420_SP)
+            || (fmt == PIXEL_FORMAT_YCbCr_422_I);
 }
 
 status_t SurfaceTexture::convert() {
@@ -1048,7 +1060,7 @@ status_t SurfaceTexture::convert() {
             "texture conversion.", __FUNCTION__);
         return OK;
     }
-
+    mConvertPending = false;
     return convert(mEGLSlots[mConversionSrcSlot].mGraphicBuffer,
         mBlitSlots[mConversionBltSlot].mGraphicBuffer);
 }

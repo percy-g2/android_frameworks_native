@@ -95,7 +95,27 @@ public:
         eElectronBeamAnimationOn  = 0x01,
         eElectronBeamAnimationOff = 0x10
     };
-
+#ifdef STE_HDMI
+    // flags for HDMI Modes
+    enum {
+        /* No output to the external device.
+         */
+        eHDMIModeOff                    = 0,
+        /* Clones all content displayed on the lcd
+         * to the external device that is passed to gralloc and
+         * in the case of overlay (Video and Camera)
+         */
+        eHDMIModeClone                  = 1,
+        /* Clones all content displayed on the lcd
+         * to the external device that is passed to gralloc
+         */
+        eHDMIModeCloneUIOnly            = 2,
+        /* Clones the content passed to the overlay to an
+         * external device.
+         */
+        eHDMIModeCloneOverlayOnly       = 3,
+    };
+#endif
     /* create connection with surface flinger, requires
      * ACCESS_SURFACE_FLINGER permission
      */
@@ -139,6 +159,11 @@ public:
 
     /* return an IDisplayEventConnection */
     virtual sp<IDisplayEventConnection> createDisplayEventConnection() = 0;
+
+#ifdef STE_HDMI
+    /* HDMI external device output cases mode */
+    virtual status_t setHDMIOutputMode(uint32_t mode) = 0;
+#endif
 };
 
 // ----------------------------------------------------------------------------
@@ -160,6 +185,9 @@ public:
         TURN_ELECTRON_BEAM_ON,
         AUTHENTICATE_SURFACE,
         CREATE_DISPLAY_EVENT_CONNECTION,
+#ifdef STE_HDMI
+        SET_HDMI_OUTPUT_MODE,
+#endif
     };
 
     virtual status_t    onTransact( uint32_t code,

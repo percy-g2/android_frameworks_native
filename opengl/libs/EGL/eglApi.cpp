@@ -819,6 +819,18 @@ EGLBoolean eglSwapBuffers(EGLDisplay dpy, EGLSurface draw)
 
     EGLBoolean result = s->cnx->egl.eglSwapBuffers(dp->disp.dpy, s->surface);
 
+#ifdef HAS_FORCE_CLEAR
+    //We clear the next frame before giving it to the application.
+    GLboolean hasScissorTest = GL_FALSE;
+    s->cnx->hooks[egl_connection_t::GLESv1_INDEX]->gl.glGetBooleanv(GL_SCISSOR_TEST,
+                                                                    &hasScissorTest);
+    if (hasScissorTest)
+        s->cnx->hooks[egl_connection_t::GLESv1_INDEX]->gl.glDisable(GL_SCISSOR_TEST);
+    s->cnx->hooks[egl_connection_t::GLESv1_INDEX]->gl.glClear(GL_COLOR_BUFFER_BIT);
+    if (hasScissorTest)
+        s->cnx->hooks[egl_connection_t::GLESv1_INDEX]->gl.glEnable(GL_SCISSOR_TEST);
+#endif
+
     if (CC_UNLIKELY(dp->traceGpuCompletion)) {
         EGLSyncKHR sync = EGL_NO_SYNC_KHR;
         {
