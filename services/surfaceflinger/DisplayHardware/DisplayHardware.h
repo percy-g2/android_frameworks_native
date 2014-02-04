@@ -56,7 +56,15 @@ public:
         SLOW_CONFIG                 = 0x00040000,   // software
         SWAP_RECTANGLE              = 0x00080000,
     };
-
+#ifdef STE_HDMI
+    // flags for HDMI Modes
+    enum {
+        HDMI_MODE_OFF                   = 0,
+        HDMI_MODE_CLONE                 = 1,
+        HDMI_MODE_CLONE_UI_ONLY         = 2,
+        HDMI_MODE_CLONE_OVERLAY_ONLY    = 3,
+    };
+#endif
     DisplayHardware(
             const sp<SurfaceFlinger>& flinger,
             uint32_t displayIndex);
@@ -65,7 +73,13 @@ public:
 
     void releaseScreen() const;
     void acquireScreen() const;
+#ifdef STE_HDMI
+    status_t rotate(unsigned int absoluteDegree);
 
+    void handleHDMIModeChange(uint32_t mode) const;
+    void UIRotationChange(int uiRotation) const;
+    status_t setHDMIOutputMode(uint32_t mode) const;
+#endif
     // Flip the front and back buffers if the back buffer is "dirty".  Might
     // be instantaneous, might involve copying the frame buffer around.
     void flip(const Region& dirty) const;
@@ -131,6 +145,9 @@ private:
     mutable uint32_t mPageFlipCount;
     GLint           mMaxViewportDims[2];
     GLint           mMaxTextureSize;
+#ifdef STE_HDMI
+    mutable uint32_t mHDMIOutputMode;
+#endif
 
     nsecs_t         mRefreshPeriod;
     mutable nsecs_t mLastHwVSync;

@@ -156,6 +156,9 @@ status_t HWComposer::createWorkList(size_t numLayers) {
             free(mList);
             size_t size = sizeof(hwc_layer_list) + numLayers*sizeof(hwc_layer_t);
             mList = (hwc_layer_list_t*)malloc(size);
+#ifdef STE_HARDWARE
+            memset(mList, 0, size);
+#endif
             mCapacity = numLayers;
         }
         mList->flags = HWC_GEOMETRY_CHANGED;
@@ -241,7 +244,17 @@ size_t HWComposer::getNumLayers() const {
 hwc_layer_t* HWComposer::getLayers() const {
     return mList ? mList->hwLayers : 0;
 }
-
+#ifdef STE_HARDWARE
+/* HWC_DEVICE_API_VERSION_0_3_STE */
+status_t HWComposer::setParameter(int param, int value) const {
+    if (mHwc && mHwc->common.version >= HWC_DEVICE_API_VERSION_0_3_STE
+                                            && mHwc->methods->setParameter) {
+        int err = mHwc->methods->setParameter(mHwc, param, value);
+        return (status_t)err;
+    }
+    return  NO_ERROR;
+}
+#endif
 void HWComposer::dump(String8& result, char* buffer, size_t SIZE,
         const Vector< sp<LayerBase> >& visibleLayersSortedByZ) const {
     if (mHwc && mList) {

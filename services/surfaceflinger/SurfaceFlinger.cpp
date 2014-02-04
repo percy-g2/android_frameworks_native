@@ -547,7 +547,38 @@ void SurfaceFlinger::handleTransactionLocked(uint32_t transactionFlags)
 {
     const LayerVector& currentLayers(mCurrentState.layersSortedByZ);
     const size_t count = currentLayers.size();
+#ifdef STE_HDMI
+    if (transactionFlags & eTransactionNeeded) {
+        if (mCurrentState.HDMIOutputMode != mDrawingState.HDMIOutputMode) {
+            const int dpy = 0;
+            GraphicPlane& plane(graphicPlane(dpy));
+            const DisplayHardware& hw(plane.displayHardware());
+            uint32_t HDMIOutputMode;
 
+            switch (mCurrentState.HDMIOutputMode) {
+                case ISurfaceComposer::eHDMIModeOff:
+                    HDMIOutputMode = DisplayHardware::HDMI_MODE_OFF;
+                    break;
+                case ISurfaceComposer::eHDMIModeClone:
+                    HDMIOutputMode = DisplayHardware::HDMI_MODE_CLONE;
+                    break;
+                case ISurfaceComposer::eHDMIModeCloneUIOnly:
+                    HDMIOutputMode = DisplayHardware::HDMI_MODE_CLONE_UI_ONLY;
+                    break;
+                case ISurfaceComposer::eHDMIModeCloneOverlayOnly:
+                    HDMIOutputMode = DisplayHardware::HDMI_MODE_CLONE_OVERLAY_ONLY;
+                    break;
+                default:
+                    HDMIOutputMode = DisplayHardware::HDMI_MODE_OFF;
+            }
+            hw.setHDMIOutputMode(HDMIOutputMode);
+            for (size_t i=0 ; i<count ; i++) {
+                const sp<LayerBase>& layer = currentLayers[i];
+                layer->requestTransaction();
+            }
+        }
+    }
+#endif
     /*
      * Traversal of the children
      * (perform the transaction for each of them if needed)
@@ -579,6 +610,10 @@ void SurfaceFlinger::handleTransactionLocked(uint32_t transactionFlags)
             const int orientation = mCurrentState.orientation;
             // Currently unused: const uint32_t flags = mCurrentState.orientationFlags;
             GraphicPlane& plane(graphicPlane(dpy));
+#ifdef STE_HARDWARE
+            int hwWidth, hwHeight;
+            HWComposer& hwc(graphicPlane(0).displayHardware().getHwComposer());
+#endif
             plane.setOrientation(orientation);
 #ifdef QCOM_HARDWARE
             const Transform& planeTransform(plane.transform());
@@ -592,7 +627,18 @@ void SurfaceFlinger::handleTransactionLocked(uint32_t transactionFlags)
 
             mVisibleRegionsDirty = true;
             mDirtyRegion.set(hw.bounds());
+#ifdef STE_HDMI
+            hwWidth = hw.getWidth();
+            hwHeight = hw.getHeight();
 
+            glViewport(0, 0, hwWidth, hwHeight);
+            glMatrixMode(GL_PROJECTION);
+            glLoadIdentity();
+            glOrthof(0, hwWidth, 0, hwHeight, 0, 1); // l=0, r=w ; b=0, t=h
+
+            if (mCurrentState.HDMIOutputMode != ISurfaceComposer::eHDMIModeOff)
+                hw.UIRotationChange(orientation);
+#endif
 #if defined(BOARD_USES_SAMSUNG_HDMI) && defined(SAMSUNG_EXYNOS5250)
             HWComposer& hwc(graphicPlane(0).displayHardware().getHwComposer());
             int overlayLayerCount = hwc.getLayerCount(HWC_OVERLAY);
@@ -1319,6 +1365,18 @@ void SurfaceFlinger::setTransactionState(const Vector<ComposerState>& state,
     }
 }
 
+#ifdef STE_HDMI
+status_t SurfaceFlinger::setHDMIOutputMode(uint32_t mode)
+{
+    Mutex::Autolock _l(mStateLock);
+    if (mCurrentState.HDMIOutputMode != mode) {
+        mCurrentState.HDMIOutputMode = mode;
+        setTransactionFlags(eTransactionNeeded | eTraversalNeeded);
+        mTransactionCV.wait(mStateLock);
+    }
+    return 0;
+}
+#endif
 sp<ISurface> SurfaceFlinger::createSurface(
         ISurfaceComposerClient::surface_data_t* params,
         const String8& name,
@@ -1987,6 +2045,15 @@ status_t SurfaceFlinger::renderScreenToTextureLocked(DisplayID dpy,
     glDisable(GL_TEXTURE_2D);
     glClearColor(0,0,0,1);
     glClear(GL_COLOR_BUFFER_BIT);
+#ifdef FB_ROTATION
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    if (mDrawingState.orientation == 1)
+        glRotatef(-90, 0, 0, 1);
+    else if (mDrawingState.orientation == 3)
+        glRotatef(90, 0, 0, 1);
+    glOrthof(0, hw_w, 0, hw_h, 0, 1);
+#endif
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
     const Vector< sp<LayerBase> >& layers(mVisibleLayersSortedByZ);
@@ -2001,6 +2068,12 @@ status_t SurfaceFlinger::renderScreenToTextureLocked(DisplayID dpy,
     // back to main framebuffer
     glBindFramebufferOES(GL_FRAMEBUFFER_OES, 0);
     glDeleteFramebuffersOES(1, &name);
+
+#ifdef FB_ROTATION
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrthof(0, hw_w, 0, hw_h, 0, 1);
+#endif
 
     *textureName = tname;
     *uOut = u;
@@ -2055,14 +2128,34 @@ status_t SurfaceFlinger::electronBeamOffAnimationImplLocked()
     }
 
     GLfloat vtx[8];
+#ifndef STE_HARDWARE
     const GLfloat texCoords[4][2] = { {0,0}, {0,v}, {u,v}, {u,0} };
+#else
+    const GLfloat (*texCoords)[4][2];
+    const GLfloat texCoords0[4][2] = { {0,0}, {0,v}, {u,v}, {u,0} };
+#ifdef FB_ROTATION
+    const GLfloat texCoords1[4][2] = { {0,v}, {u,v}, {u,0}, {0,0} };
+    const GLfloat texCoords3[4][2] = { {u,0}, {0,0}, {0,v}, {u,v} };
+
+    if (mDrawingState.orientation == 1)
+        texCoords = &texCoords1;
+    else if (mDrawingState.orientation == 3)
+        texCoords = &texCoords3;
+    else
+#endif
+        texCoords = &texCoords0;
+#endif
     glBindTexture(GL_TEXTURE_2D, tname);
     glTexEnvx(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
     glTexParameterx(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameterx(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameterx(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameterx(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+#ifndef STE_HARDWARE
     glTexCoordPointer(2, GL_FLOAT, 0, texCoords);
+#else
+    glTexCoordPointer(2, GL_FLOAT, 0, *texCoords);
+#endif
     glEnableClientState(GL_TEXTURE_COORD_ARRAY);
     glVertexPointer(2, GL_FLOAT, 0, vtx);
 
@@ -2496,12 +2589,34 @@ status_t SurfaceFlinger::captureScreenImplLocked(DisplayID dpy,
     const DisplayHardware& hw(graphicPlane(dpy).displayHardware());
     const uint32_t hw_w = hw.getWidth();
     const uint32_t hw_h = hw.getHeight();
-
+#ifndef STE_HARDWARE
     if ((sw > hw_w) || (sh > hw_h))
         return BAD_VALUE;
+#else
+#ifdef FB_ROTATION
+    if (mDrawingState.orientation == 0 || mDrawingState.orientation == 2) {
+#endif
+        if ((sw > hw_w) || (sh > hw_h))
+            return BAD_VALUE;
 
+        sw = (!sw) ? hw_w : sw;
+        sh = (!sh) ? hw_h : sh;
+#ifdef FB_ROTATION
+    } else {
+      // Draw landscape mode in landscape buffer
+        if ((sw > hw_h) || (sh > hw_w))
+            return BAD_VALUE;
+
+        uint32_t tmp = sw;
+        sw = (!sh) ? hw_w : sh;
+        sh = (!tmp) ? hw_h : tmp;
+    }
+#endif
+#endif
+#ifndef STE_HARDWARE
     sw = (!sw) ? hw_w : sw;
     sh = (!sh) ? hw_h : sh;
+#endif
     const size_t size = sw * sh * 4;
 
     //ALOGD("screenshot: sw=%d, sh=%d, minZ=%d, maxZ=%d",
@@ -2561,15 +2676,59 @@ status_t SurfaceFlinger::captureScreenImplLocked(DisplayID dpy,
                     new MemoryHeapBase(size, 0, "screen-capture") );
             void* const ptr = base->getBase();
             if (ptr) {
+#ifdef STE_HARDWARE
+               void *buf = NULL;
+#ifdef FB_ROTATION
+                if (mDrawingState.orientation == 1 || mDrawingState.orientation == 3) {
+                    buf = malloc(size);
+                } else
+#endif
+                {
+                    buf = ptr;
+                }
+#endif
                 // capture the screen with glReadPixels()
                 ScopedTrace _t(ATRACE_TAG, "glReadPixels");
+#ifndef STE_HARDWARE
                 glReadPixels(0, 0, sw, sh, GL_RGBA, GL_UNSIGNED_BYTE, ptr);
+#else
+                glReadPixels(0, 0, sw, sh, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+#endif
                 if (glGetError() == GL_NO_ERROR) {
                     *heap = base;
+#ifndef STE_HARDWARE
                     *w = sw;
                     *h = sh;
+#endif
                     *f = PIXEL_FORMAT_RGBA_8888;
                     result = NO_ERROR;
+#ifdef STE_HARDWARE
+#ifdef FB_ROTATION
+                    if (mDrawingState.orientation == 3 || mDrawingState.orientation == 1) {
+                        // Convert landscape buffer to portrait buffer
+                        for (uint32_t i = 0; i < sh; i++) {
+                            for (uint32_t j = 0; j < sw; j++) {
+                                uint32_t *tmp;
+                                if (mDrawingState.orientation == 3)
+                                    tmp = &((uint32_t *)ptr)[(sw - j - 1) * sh + i];
+                                 else
+                                    tmp = &((uint32_t *)ptr)[j * sh + (sh - 1 - i)];
+
+                                *tmp = ((uint32_t *)buf)[i * sw + j];
+                            }
+                        }
+                        free(buf);
+                        // Reset orientation to portrait mode
+                        *w = sh;
+                        *h = sw;
+                    } else
+#endif
+                    {
+                        // Already in portrait mode
+                        *w = sw;
+                        *h = sh;
+                    }
+#endif
                 }
             } else {
                 result = NO_MEMORY;
@@ -2842,6 +3001,18 @@ void GraphicBufferAlloc::setGraphicBufferSize(int size) {
 GraphicPlane::GraphicPlane()
     : mHw(0)
 {
+#ifdef STE_HARDWARE
+    char value[PROPERTY_VALUE_MAX];
+    property_get("ro.sf.hwrotation", value, "0");
+    mDisplayRotation = atoi(value);
+    if (mDisplayRotation % 90 != 0 || mDisplayRotation <= INT_MIN + 360)
+        mDisplayRotation = 0;
+    if (mDisplayRotation < 0)
+        // Make positive
+        mDisplayRotation += ((mDisplayRotation / -360) + 1) * 360;
+    // Make >= 0, < 360
+    mDisplayRotation = normalizeDegree(mDisplayRotation);
+#endif
 }
 
 GraphicPlane::~GraphicPlane() {
@@ -2863,7 +3034,7 @@ int GraphicPlane::getHeight() const {
 void GraphicPlane::setDisplayHardware(DisplayHardware *hw)
 {
     mHw = hw;
-
+#ifndef STE_HARDWARE
     // initialize the display orientation transform.
     // it's a constant that should come from the display driver.
     int displayOrientation = ISurfaceComposer::eOrientationDefault;
@@ -2894,10 +3065,10 @@ void GraphicPlane::setDisplayHardware(DisplayHardware *hw)
         mDisplayWidth = w;
         mDisplayHeight = h;
     }
-
+#endif
     setOrientation(ISurfaceComposer::eOrientationDefault);
 }
-
+#ifndef STE_HARDWARE
 status_t GraphicPlane::orientationToTransfrom(
         int orientation, int w, int h, Transform* tr)
 {
@@ -2921,28 +3092,86 @@ status_t GraphicPlane::orientationToTransfrom(
     tr->set(flags, w, h);
     return NO_ERROR;
 }
-
+#endif
 status_t GraphicPlane::setOrientation(int orientation)
 {
     // If the rotation can be handled in hardware, this is where
     // the magic should happen.
-
+#ifndef STE_HARDWARE
     const DisplayHardware& hw(displayHardware());
     const float w = mDisplayWidth;
     const float h = mDisplayHeight;
     mWidth = int(w);
     mHeight = int(h);
+#else
+    status_t ret;
+    unsigned int fbDegree;
+    unsigned int glDegree = 0;
 
+    ret = orientationToDegree(orientation, &fbDegree);
+    if (ret != NO_ERROR)
+        return ret;
+
+    /*
+     * ST-Ericsson: MCDE can't rotate 180 with video mode displays so we do 180
+     * rotations in GL, should be ok as a 180 rotation is a light operation
+     * (flip x + flip y).
+     */
+    if (fbDegree == 180) {
+        glDegree = normalizeDegree(glDegree + fbDegree);
+        fbDegree = 0;
+    }
+
+#ifdef FB_ROTATION
+    if (mHw->rotate(fbDegree) != NO_ERROR)
+#endif
+    {
+#ifdef FB_ROTATION
+        unsigned int invertedDisplayRotation = normalizeDegree(360 - mDisplayRotation);
+        // Restore "original" FB rotation
+        (void)mHw->rotate(invertedDisplayRotation);
+#endif
+
+        /*
+         * Make GL do everything.
+         */
+        glDegree = normalizeDegree(fbDegree + glDegree);
+        fbDegree = 0;
+    }
+
+    unsigned int glDegreeCw = normalizeDegree(360 - glDegree);
+
+    int fbWidth = mHw->getWidth();
+    int fbHeight = mHw->getHeight();
+#endif
+#ifndef STE_HARDWARE
     Transform orientationTransform;
     GraphicPlane::orientationToTransfrom(orientation, w, h,
             &orientationTransform);
     if (orientation & ISurfaceComposer::eOrientationSwapMask) {
         mWidth = int(h);
         mHeight = int(w);
+#else
+    uint32_t orientFlags = degreeToOrientFlags(glDegreeCw);
+    unsigned int fbDegreeCw = normalizeDegree(360 - fbDegree);
+    mHw->getHwComposer().setParameter(HWC_HARDWARE_ROTATION, fbDegreeCw);
+    mHw->getHwComposer().setParameter(HWC_UI_ORIENTATION, glDegree);
+    if (mGlobalTransform.set(orientFlags, fbWidth, fbHeight) != NO_ERROR)
+        ALOGE("Can't create global transform. Not handled, corrupt state!");
+
+    if (glDegree % 180 == 0) {
+        mWidth = fbWidth;
+        mHeight = fbHeight;
+    } else {
+        mWidth = fbHeight;
+        mHeight = fbWidth;
+#endif
     }
 
     mOrientation = orientation;
+#ifndef STE_HARDWARE
     mGlobalTransform = mDisplayTransform * orientationTransform;
+#endif
     return NO_ERROR;
 }
 
@@ -2962,6 +3191,55 @@ EGLDisplay GraphicPlane::getEGLDisplay() const {
     return mHw->getEGLDisplay();
 }
 
+#ifdef STE_HARDWARE
+status_t GraphicPlane::orientationToDegree(int orientation, unsigned int *degree) const
+{
+    int invertedDisplayRotation = 360 - mDisplayRotation;
+
+    switch (orientation) {
+    case ISurfaceComposer::eOrientationDefault:
+        *degree = 0 + invertedDisplayRotation;
+        break;
+    case ISurfaceComposer::eOrientation90:
+        *degree = 270 + invertedDisplayRotation;
+        break;
+    case ISurfaceComposer::eOrientation180:
+        *degree = 180 + invertedDisplayRotation;
+        break;
+    case ISurfaceComposer::eOrientation270:
+        *degree = 90 + invertedDisplayRotation;
+        break;
+    default:
+        return BAD_VALUE;
+    }
+
+    *degree = normalizeDegree(*degree);
+
+    return NO_ERROR;
+}
+
+uint32_t GraphicPlane::degreeToOrientFlags(int degree) const
+{
+    switch (degree) {
+    case 0:
+        return Transform::ROT_0;
+    case 90:
+        return Transform::ROT_90;
+    case 180:
+        return Transform::ROT_180;
+    case 270:
+        return Transform::ROT_270;
+    default:
+        ALOGE("Illegal degree %i received. Not handled, corrupt state!", degree);
+        return Transform::ROT_0;
+    }
+}
+
+unsigned int GraphicPlane::normalizeDegree(unsigned int degree) const
+{
+    return degree % 360;
+}
+#endif
 // ---------------------------------------------------------------------------
 
 }; // namespace android
