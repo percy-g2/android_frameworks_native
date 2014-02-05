@@ -247,11 +247,13 @@ hwc_layer_t* HWComposer::getLayers() const {
 #ifdef STE_HARDWARE
 /* HWC_DEVICE_API_VERSION_0_3_STE */
 status_t HWComposer::setParameter(int param, int value) const {
+#ifdef HWC_DEVICE_API_VERSION_0_3_STE
     if (mHwc && mHwc->common.version >= HWC_DEVICE_API_VERSION_0_3_STE
                                             && mHwc->methods->setParameter) {
         int err = mHwc->methods->setParameter(mHwc, param, value);
         return (status_t)err;
     }
+#endif
     return  NO_ERROR;
 }
 #endif
