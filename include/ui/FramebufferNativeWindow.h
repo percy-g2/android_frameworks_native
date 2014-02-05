@@ -66,7 +66,7 @@ public:
 #ifdef STE_HARDWARE
     status_t rotate(unsigned int absoluteDegree);
 
-    void discardQueuedBuffers(bool on)
+    void discardQueuedBuffers(bool on);
 #endif
     void dump(String8& result);
 #ifdef STE_HARDWARE
